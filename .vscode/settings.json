@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "**/roles/**/*.yml": "ansible",
+        "**/roles/**/*.yaml": "ansible",
+        "**/roles/**/*.j2": "ansible-jinja"
+    }
+}
