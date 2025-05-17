@@ -1,0 +1,5 @@
+- name: Install OKD
+  become: false
+  hosts: localhost
+  roles:
+  - okd

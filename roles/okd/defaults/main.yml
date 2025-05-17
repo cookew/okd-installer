@@ -1,0 +1,9 @@
+# Version of OKD on CentOS Stream CoreOS to use.
+# The versions can be located on the github webpage.
+# https://github.com/okd-project/okd/releases
+# Alternatively, use "latest" to install the latest stable version.
+# okd_installer_version: 4.19.0-okd-scos.0
+okd_installer_version: latest
+
+# Path of where to store the working files.
+okd_installer_working_directory: ~/okd-installer

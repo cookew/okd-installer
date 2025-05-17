@@ -1,0 +1,39 @@
+# TODO Clean up old VMs
+# for i in $(sudo virsh list | tail -n +3 | grep bootstrap | awk {'print $2'})
+# do
+#   sudo virsh destroy ${i}
+#   sudo virsh undefine ${i}
+#   sudo virsh vol-delete ${i} --pool ${i}
+#   sudo virsh vol-delete ${i}.ign --pool ${i}
+#   sudo virsh pool-destroy ${i}
+#   sudo virsh pool-undefine ${i}
+# done
+
+# Only do this after we implement the virsh stuff above
+# - name: Remove old privileged files
+#   become: true
+#   loop:
+#   - /var/lib/libvirt/openshift-images
+#   loop_control:
+#     loop_var: path_name
+#   ansible.builtin.file:
+#     path: "{{ path_name }}"
+#     state: absent
+
+- name: Remove old files
+  become: false
+  loop:
+  - ~/.cache/openshift-installer
+  - "{{ okd_installer_working_directory }}/clusterconfigs"
+  loop_control:
+    loop_var: path_name
+  ansible.builtin.file:
+    path: "{{ path_name }}"
+    state: absent
+
+# This may need to be state: stopped first
+- name: Remove image cache container
+  become: false
+  containers.podman.podman_container:
+    name: image_cache
+    state: absent

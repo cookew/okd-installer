@@ -1,0 +1,253 @@
+- name: Sanity checks
+  become: false
+  ansible.builtin.assert:
+    that:
+    - ansible_facts['os_family'] == "RedHat"
+
+- name: Get version if using latest
+  become: false
+  register: okd_installer_version_content
+  when:
+  - 'okd_installer_version == "latest"'
+  ansible.builtin.uri:
+    url: https://api.github.com/repos/okd-project/okd/releases/latest
+
+- name: Set version if using latest
+  become: false
+  register: okd_installer_version_content
+  when:
+  - 'okd_installer_version == "latest"'
+  ansible.builtin.set_fact:
+    okd_installer_version: "{{ okd_installer_version_content.json.tag_name }}"
+
+- name: Configured settings
+  become: false
+  ansible.builtin.debug:
+    msg: |
+      okd_installer_version: {{ okd_installer_version }}
+      okd_installer_working_directory: {{ okd_installer_working_directory }}
+
+- name: Run cleanup tasks
+  become: false
+  ansible.builtin.include_tasks:
+    file: cleanup.yml
+
+- name: Install dependencies
+  become: true
+  ansible.builtin.package:
+    name:
+    - ipmitool
+    - jq
+    - libvirt
+    - mkisofs
+    - podman
+    - python3-devel
+    - qemu-kvm
+
+- name: Make the working directory structure
+  become: false
+  loop:
+  - "{{ okd_installer_working_directory }}"
+  - "{{ okd_installer_working_directory }}/clusterconfigs"
+  - "{{ okd_installer_working_directory }}/download"
+  - "{{ okd_installer_working_directory }}/image_cache"
+  loop_control:
+    loop_var: directory_name
+  ansible.builtin.file:
+    path: "{{ okd_installer_working_directory }}/{{ directory_name }}"
+    recurse: true
+    state: directory
+
+- name: Make the download directory
+  become: false
+  ansible.builtin.file:
+    mode: "0755"
+    path: "{{ okd_installer_working_directory }}/download"
+    state: directory
+
+- name: Get checksums
+  become: false
+  register: checksums
+  ansible.builtin.uri:
+    return_content: true
+    url: "https://github.com/okd-project/okd/releases/download/{{ okd_installer_version }}/sha256sum.txt"
+
+- name: Get checksums
+  become: false
+  register: checksums
+  ansible.builtin.uri:
+    url: "https://github.com/okd-project/okd/releases/download/{{ okd_installer_version }}/sha256sum.txt"
+
+- name: Download files
+  become: false
+  loop:
+  - "openshift-install-linux-{{ okd_installer_version }}.tar.gz"
+  - "openshift-client-linux-{{ okd_installer_version }}.tar.gz"
+  loop_control:
+    loop_var: file_name
+  ansible.builtin.get_url:
+    checksum: "sha256:{{ checksums.content | regex_search('(?P<hash>.*)  ' + file_name, '\\g<hash>') | first }}"
+    dest: "{{ okd_installer_working_directory }}/download/{{ file_name }}"
+    mode: "0655"
+    url: "https://github.com/okd-project/okd/releases/download/{{ okd_installer_version }}/{{ file_name }}"
+
+- name: Extract downloaded files
+  become: false
+  loop:
+  - "openshift-install-linux-{{ okd_installer_version }}.tar.gz"
+  - "openshift-client-linux-{{ okd_installer_version }}.tar.gz"
+  loop_control:
+    loop_var: file_name
+  ansible.builtin.unarchive:
+    dest: "{{ okd_installer_working_directory }}/download/"
+    remote_src: true
+    src: "{{ okd_installer_working_directory }}/download/{{ file_name }}"
+
+- name: Set SELinux contexts for image cache directory
+  become: true
+  community.general.sefcontext:
+    setype: httpd_sys_content_t
+    state: present
+    target: "{{ okd_installer_working_directory }}/image_cache(/.*)?"
+
+- name: Apply SELinux contexts for image cache directory
+  become: true
+  changed_when: true
+  ansible.builtin.command:
+    cmd: "restorecon -R {{ okd_installer_working_directory }}/image_cache"
+
+- name: Allow firewall services
+  become: true
+  loop:
+  - ssh
+  loop_control:
+    loop_var: firewall_service
+  ansible.posix.firewalld:
+    immediate: true
+    offline: true
+    permanent: true
+    service: "{{ firewall_service }}"
+    state: enabled
+
+- name: Allow firewall ports
+  become: true
+  loop:
+  - 8080/tcp
+  loop_control:
+    loop_var: firewall_port
+  ansible.posix.firewalld:
+    immediate: true
+    offline: true
+    permanent: true
+    port: "{{ firewall_port }}"
+    state: enabled
+
+- name: Enable and start the firewall
+  become: true
+  ansible.builtin.service:
+    enabled: true
+    name: firewalld
+    state: started
+
+- name: Run the image cache container
+  become: false
+  containers.podman.podman_container:
+    detach: true
+    image: registry.access.redhat.com/ubi9/httpd-24
+    image_strict: true
+    image_volume: ignore
+    name: image_cache
+    publish:
+    - 8080:8080/tcp
+    pull: missing
+    restart_policy: always
+    state: started
+    volume:
+    - "{{ okd_installer_working_directory }}/image_cache:/var/www/html"
+
+# TODO Configure and start libvirt
+# sudo usermod -a -G libvirt $USER
+
+- name: Enable and start libvirtd
+  become: true
+  ansible.builtin.service:
+    enabled: true
+    name: libvirtd
+    state: started
+
+- name: Set up new VM pool
+  become: true
+  loop:
+  - virsh pool-define-as --name default --type dir --target /var/lib/libvirt/images
+  - virsh pool-start default
+  - virsh pool-autostart default
+  loop_control:
+    loop_var: command
+  changed_when: true
+  ansible.builtin.command:
+    cmd: "{{ command }}"
+
+# TODO Set up the openshift install dir and copy config
+# cp ${INSTALL_CONFIG} ${WORKING_DIR}/clusterconfigs/install-config.yaml
+
+# RHCOS_QEMU_URI=$(${WORKING_DIR}/download/openshift-install coreos print-stream-json | jq -r --arg ARCH "$(arch)" '.architectures[$ARCH].artifacts.qemu.formats["qcow2.xz"].disk.location')
+# RHCOS_QEMU_UNCOMPRESSED_SHA256=$(${WORKING_DIR}/download/openshift-install coreos print-stream-json | jq -r --arg ARCH "$(arch)" '.architectures[$ARCH].artifacts.qemu.formats["qcow2.xz"].disk["uncompressed-sha256"]')
+# RHCOS_QEMU_NAME=${RHCOS_QEMU_URI##*/}
+# BAREMETAL_IP=$(ip --json -4 a show baremetal | jq '.[0].addr_info[0].local' -r)
+
+# TODO Make sure the bootstrap os image url is in the install-config.yaml file
+# if ! grep " bootstrapOSImage: http://${BAREMETAL_IP}:8080/${RHCOS_QEMU_NAME}?sha256=${RHCOS_QEMU_UNCOMPRESSED_SHA256}$" ${INSTALL_CONFIG}
+# then
+#   echo
+#   echo "This should be in your ${INSTALL_CONFIG} file"
+#   echo "platform:"
+#   echo "  baremetal:"
+#   echo "    bootstrapOSImage: http://${BAREMETAL_IP}:8080/${RHCOS_QEMU_NAME}?sha256=${RHCOS_QEMU_UNCOMPRESSED_SHA256}"
+#   echo
+#   exit 1
+# fi
+# TODO Download the image
+# if [ ! -f "${WORKING_DIR}/image_cache/${RHCOS_QEMU_NAME}" ]
+# then
+#   curl -L ${RHCOS_QEMU_URI} -o ${WORKING_DIR}/image_cache/${RHCOS_QEMU_NAME}
+# fi
+
+# TODO Generate SSH keys if not exist in install-config.yml
+# if [ ! -f ${WORKING_DIR}/id_rsa ]
+# then
+#   ssh-keygen -t ed25519 -f ${WORKING_DIR}/id_rsa -N ''
+# fi
+
+# if ! grep "^sshKey: $(cat ${WORKING_DIR}/id_rsa.pub)$" ${INSTALL_CONFIG}
+# then
+#   echo
+#   echo "This should be in your ${INSTALL_CONFIG} file"
+#   echo "sshKey: $(cat ${WORKING_DIR}/id_rsa.pub)"
+#   echo
+#   exit 1
+# fi
+
+- name: Create the manifests
+  become: false
+  changed_when: true
+  ansible.builtin.command:
+    cmd: "{{ okd_installer_working_directory }}/download/openshift-install --dir {{ okd_installer_working_directory }}/clusterconfigs create manifests"
+
+# TODO Exit if we are only doing up to manifests
+# if [ "${1}" = "manifests" ]
+# then
+#   exit 0
+# fi
+
+- name: Tip
+  become: false
+  ansible.builtin.debug:
+    msg: |
+      You may want to tail the log file to follow the progress
+      tail -f {{ okd_installer_working_directory }}/clusterconfigs/.openshift_install.log
+
+- name: Create the cluster
+  become: false
+  changed_when: true
+  ansible.builtin.command:
+    cmd: "{{ okd_installer_working_directory }}/download/openshift-install --dir {{ okd_installer_working_directory }}/clusterconfigs --log-level debug create cluster"

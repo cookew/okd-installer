@@ -1,0 +1,8 @@
+- name: Cleanup OKD
+  become: false
+  hosts: localhost
+  tasks:
+  - name: Cleanup OKD
+    ansible.builtin.import_role:
+      name: okd
+      tasks_from: cleanup.yml
