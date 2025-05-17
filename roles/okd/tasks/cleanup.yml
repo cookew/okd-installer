@@ -24,7 +24,7 @@
   become: false
   loop:
   - ~/.cache/openshift-installer
-  - "{{ okd_installer_working_directory }}/clusterconfigs"
+  - "{{ okd_working_directory }}/clusterconfigs"
   loop_control:
     loop_var: path_name
   ansible.builtin.file:
