@@ -202,65 +202,32 @@
     mode: "0644"
     src: install-config.yaml
 
-# RHCOS_QEMU_URI=$(${WORKING_DIR}/download/openshift-install coreos print-stream-json | jq -r --arg ARCH "$(arch)" '.architectures[$ARCH].artifacts.qemu.formats["qcow2.xz"].disk.location')
-# RHCOS_QEMU_UNCOMPRESSED_SHA256=$(${WORKING_DIR}/download/openshift-install coreos print-stream-json | jq -r --arg ARCH "$(arch)" '.architectures[$ARCH].artifacts.qemu.formats["qcow2.xz"].disk["uncompressed-sha256"]')
-# RHCOS_QEMU_NAME=${RHCOS_QEMU_URI##*/}
-# BAREMETAL_IP=$(ip --json -4 a show baremetal | jq '.[0].addr_info[0].local' -r)
-# BAREMETAL_IP="{{ ansible_default_ipv4.address }}"
-
-# TODO Download the image
-# if [ ! -f "${WORKING_DIR}/image_cache/${RHCOS_QEMU_NAME}" ]
-# then
-#   curl -L ${RHCOS_QEMU_URI} -o ${WORKING_DIR}/image_cache/${RHCOS_QEMU_NAME}
-# fi
-
 - name: Get qemu image download URL
   become: false
   changed_when: true
   register: qemu_image_json
   ansible.builtin.command:
-    cmd: "{{ okd_working_directory }}/download/openshift-install coreos print-stream-json | jq '.architectures[\"{{ ansible_architecture }}\"].artifacts.qemu.formats[\"qcow2.xz\"].disk'"
+    cmd: "{{ okd_working_directory }}/download/openshift-install coreos print-stream-json"
 
 - name: Download qemu image
   become: false
   ansible.builtin.get_url:
-    checksum: "sha256:{{ (qemu_image_json.stdout | from_json).sha256 }}"
-    dest: "{{ okd_working_directory }}/image_cache/{{ (qemu_image_json.stdout | from_json).location | urlsplit('path') | basename }}"
+    checksum: "sha256:{{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk.sha256 }}"
+    dest: "{{ okd_working_directory }}/image_cache/{{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk.location | urlsplit('path') | basename | replace('.gz', '') }}"
     mode: "0644"
-    url: "{{ (qemu_image_json.stdout | from_json).location }}"
+    url: "{{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk.location }}"
 
-- name: Extract downloaded files
-  become: false
-  ansible.builtin.unarchive:
-    dest: "{{ okd_working_directory }}/image_cache/"
-    remote_src: true
-    src: "{{ okd_working_directory }}/image_cache/{{ (qemu_image_json.stdout | from_json).location | urlsplit('path') | basename }}"
-
-- name: Get hash of extracted file
-  become: false
-  register: qemu_image_stat
-  ansible.builtin.stat:
-    path: "{{ okd_working_directory }}/image_cache/{{ (qemu_image_json.stdout | from_json).location | urlsplit('path') | basename }}"
-
-- name: Check hash of extracted image
-  become: false
-  ansible.builtin.assert:
-    that:
-    - 'qemu_image_stat.stat.checksum == (qemu_image_json.stdout | from_json).uncompressed-sha256'
-
-
-# TODO Make sure the bootstrap os image url is in the install-config.yaml file
+# TODO Output looks ugly
+# TODO Only run this if we need to
 # TODO We should just update this regardless if it is there or not
-# if ! grep " bootstrapOSImage: http://${BAREMETAL_IP}:8080/${RHCOS_QEMU_NAME}?sha256=${RHCOS_QEMU_UNCOMPRESSED_SHA256}$" ${INSTALL_CONFIG}
-# then
-#   echo
-#   echo "This should be in your ${INSTALL_CONFIG} file"
-#   echo "platform:"
-#   echo "  baremetal:"
-#   echo "    bootstrapOSImage: http://${BAREMETAL_IP}:8080/${RHCOS_QEMU_NAME}?sha256=${RHCOS_QEMU_UNCOMPRESSED_SHA256}"
-#   echo
-#   exit 1
-# fi
+- name: Bootstrap notification message
+  become: false
+  ansible.builtin.debug:
+    msg: |
+      This should be in your install-config.yaml file
+        platform:
+          baremetal:
+            bootstrapOSImage: http://{{ ansible_default_ipv4.address }}:8080/{{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk.location | urlsplit('path') | basename | replace('.gz', '') }}?sha256={{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk['uncompressed-sha256'] }}"
 
 # TODO Create a ssh key if the file does not exist
 # TODO This should only be done if it is not specified in the install-yaml
@@ -295,7 +262,7 @@
   become: false
   ansible.builtin.debug:
     msg: |
-      You may want to tail the log file to follow the progress
+      You may want to tail the log file to follow the progress:
       tail -f {{ okd_working_directory }}/clusterconfigs/.openshift_install.log
 
 - name: Create the cluster
