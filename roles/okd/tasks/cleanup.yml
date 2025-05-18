@@ -1,24 +1,83 @@
-# TODO Clean up old VMs
-# for i in $(sudo virsh list | tail -n +3 | grep bootstrap | awk {'print $2'})
-# do
-#   sudo virsh destroy ${i}
-#   sudo virsh undefine ${i}
+- name: Get list of bootstrap VMs
+  become: true
+  register: bootstrap_vm_list
+  ansible.builtin.shell:
+    cmd: "virsh list | tail -n +3 | grep bootstrap | awk {'print $2'}"
+
+- name: Get list of running VMs
+  become: true
+  register: vm_running_list
+  community.libvirt.virt:
+    command: list_vms
+    state: running
+
+- name: Destroy running bootstrap VMs
+  become: true
+  loop: "{{ vm_running_list.list_vms }}"
+  loop_control:
+    loop_var: vm
+  when:
+  - '"bootstrap" in vm'
+  community.libvirt.virt:
+    command: destroy
+    name: "{{ vm }}"
+
+- name: Get list of VMs
+  become: true
+  register: vm_list
+  community.libvirt.virt:
+    command: list_vms
+
+- name: Undefine all bootstrap VMs
+  become: true
+  loop: "{{ vm_list.list_vms }}"
+  loop_control:
+    loop_var: vm
+  when:
+  - '"bootstrap" in vm'
+  community.libvirt.virt:
+    command: undefine
+    force: true
+    name: "{{ vm }}"
+
+- name: List available pools
+  become: true
+  register: pool_facts
+  community.libvirt.virt_pool:
+    command: facts
+
 #   sudo virsh vol-delete ${i} --pool ${i}
 #   sudo virsh vol-delete ${i}.ign --pool ${i}
-#   sudo virsh pool-destroy ${i}
-#   sudo virsh pool-undefine ${i}
-# done
 
-# Only do this after we implement the virsh stuff above
-# - name: Remove old privileged files
-#   become: true
-#   loop:
-#   - /var/lib/libvirt/openshift-images
-#   loop_control:
-#     loop_var: path_name
-#   ansible.builtin.file:
-#     path: "{{ path_name }}"
-#     state: absent
+- name: Destroy inactive bootstrap pools
+  become: true
+  loop: "{{ pool_facts.ansible_facts.ansible_libvirt_pools.values() }}"
+  loop_control:
+    loop_var: pool
+  when:
+  - '"bootstrap" in pool.path'
+  - pool.state == "active"
+  community.libvirt.virt_pool:
+    command: destroy
+    name: "{{ pool.path | basename }}"
+
+- name: Destroy inactive bootstrap pools
+  become: true
+  loop: "{{ pool_facts.ansible_facts.ansible_libvirt_pools.values() }}"
+  loop_control:
+    loop_var: pool
+  when:
+  - '"bootstrap" in pool.path'
+  - pool.state == "inactive"
+  community.libvirt.virt_pool:
+    command: undefine
+    name: "{{ pool.path | basename }}"
+
+- name: Remove old privileged files
+  become: true
+  ansible.builtin.file:
+    path: /var/lib/libvirt/openshift-images
+    state: absent
 
 - name: Remove old files
   become: false
@@ -31,7 +90,6 @@
     path: "{{ path_name }}"
     state: absent
 
-# This may need to be state: stopped first
 - name: Remove image cache container
   become: false
   containers.podman.podman_container:

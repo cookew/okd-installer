@@ -1,0 +1,24 @@
+- name: Test
+  hosts: localhost
+  become: false
+  vars:
+    okd_working_directory: ~/okd-install
+  tasks:
+  - name: IP
+    become: false
+    ansible.builtin.debug:
+      msg: |
+        "{{ okd_working_directory }}/asdf \"hello\" \\'test\\'"
+        "{{ okd_working_directory }}/download/openshift-install coreos print-stream-json | jq -r --arg ARCH {{ ansible_architecture }} '.architectures[\"{{ ansible_architecture }}\"].artifacts.qemu.formats[\"qcow2.xz\"].disk.location'"
+
+  - name: Get Qemu image download URL
+    become: false
+    changed_when: true
+    register: qemu_image_download_url
+    ansible.builtin.command:
+      cmd: "{{ okd_working_directory }}/download/openshift-install coreos print-stream-json | jq -r --arg ARCH {{ ansible_architecture }} '.architectures[\"{{ ansible_architecture }}\"].artifacts.qemu.formats[\"qcow2.xz\"].disk'"
+
+  - name: Debug
+    become: false
+    ansible.builtin.debug:
+      var: qemu_image_download_url
