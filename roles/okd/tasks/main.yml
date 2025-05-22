@@ -56,7 +56,7 @@
   loop_control:
     loop_var: directory_name
   ansible.builtin.file:
-    path: "{{ okd_working_directory }}/{{ directory_name }}"
+    path: "{{ directory_name }}"
     recurse: true
     state: directory
 
@@ -198,7 +198,7 @@
 - name: Copy the OKD install-config.yaml config
   become: false
   ansible.builtin.copy:
-    dest: "{{ okd_working_directory }}/install-config.yaml"
+    dest: "{{ okd_working_directory }}/clusterconfigs/install-config.yaml"
     mode: "0644"
     src: install-config.yaml
 
@@ -213,7 +213,7 @@
   become: false
   ansible.builtin.get_url:
     checksum: "sha256:{{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk.sha256 }}"
-    dest: "{{ okd_working_directory }}/image_cache/{{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk.location | urlsplit('path') | basename | replace('.gz', '') }}"
+    dest: "{{ okd_working_directory }}/image_cache/{{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk.location | urlsplit('path') | basename }}"
     mode: "0644"
     url: "{{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk.location }}"
 
@@ -227,7 +227,7 @@
       This should be in your install-config.yaml file
         platform:
           baremetal:
-            bootstrapOSImage: http://{{ ansible_default_ipv4.address }}:8080/{{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk.location | urlsplit('path') | basename | replace('.gz', '') }}?sha256={{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk['uncompressed-sha256'] }}"
+            bootstrapOSImage: http://{{ ansible_default_ipv4.address }}:8080/{{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk.location | urlsplit('path') | basename  }}?sha256={{ (qemu_image_json.stdout | from_json).architectures[ansible_architecture].artifacts.qemu.formats['qcow2.gz'].disk['uncompressed-sha256'] }}"
 
 # TODO Create a ssh key if the file does not exist
 # TODO This should only be done if it is not specified in the install-yaml
