@@ -1,6 +1,6 @@
 - name: Cleanup OKD
   become: false
-  hosts: localhost
+  hosts: provisioner.iaas.wcooke.me
   tasks:
   - name: Cleanup OKD
     ansible.builtin.import_role:

@@ -1,5 +1,6 @@
 .cache
-id_rsa
+id_rsa*
 vars/private.yml
 hosts/*
 inventory
+install-config.yaml

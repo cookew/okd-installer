@@ -1,5 +1,6 @@
 - name: Install OKD
   become: false
-  hosts: localhost
+  gather_facts: true
+  hosts: provisioner.iaas.wcooke.me
   roles:
   - okd
